@@ -5,8 +5,6 @@ from math import gcd
 from functools import reduce
 from collections import defaultdict
 
-
-# 1. Task Generation with UUNIFAST
 def generate_tasks(num_tasks, total_utilization):
     utilizations = []
     remaining_util = total_utilization
@@ -19,9 +17,9 @@ def generate_tasks(num_tasks, total_utilization):
 
     tasks = []
     for i, util in enumerate(utilizations):
-        period = random.choice([10, 20, 40, 50, 100])  # Common periods
+        period = random.choice([10, 20, 40, 50, 100])
         execution = util * period
-        deadline = period  # Implicit deadline
+        deadline = period
         tasks.append({
             'id': i,
             'execution': execution,
@@ -31,8 +29,6 @@ def generate_tasks(num_tasks, total_utilization):
         })
     return tasks
 
-
-# 2. Genetic Algorithm Implementation
 class GeneticScheduler:
     def __init__(self, tasks, num_cores, pop_size=50, elite=0.2, mutation_rate=0.1, generations=100):
         self.tasks = tasks
@@ -51,9 +47,7 @@ class GeneticScheduler:
         for task_idx, core_idx in enumerate(chromosome):
             core_utils[core_idx] += self.tasks[task_idx]['utilization']
 
-        # Penalize overloaded cores
         overload_penalty = sum(max(0, util - 1) * 100 for util in core_utils)
-        # Maximize balance (minimize std deviation)
         balance = np.std(core_utils) * 10
         return 1 / (1 + overload_penalty + balance)
 
@@ -85,11 +79,9 @@ class GeneticScheduler:
         for _ in range(self.generations):
             fitnesses = [self.fitness(chromo) for chromo in population]
 
-            # Elitism: keep top performers
             elite_indices = np.argsort(fitnesses)[-self.elite:]
             new_population = [population[i] for i in elite_indices]
 
-            # Selection and reproduction
             parents = self.select_parents(population, fitnesses)
             random.shuffle(parents)
 
@@ -100,24 +92,18 @@ class GeneticScheduler:
 
             population = new_population
 
-        # Return best solution
         fitnesses = [self.fitness(chromo) for chromo in population]
         return population[np.argmax(fitnesses)]
 
-
-# 3. Analysis and Visualization
 def calculate_metrics(tasks, assignment, num_cores):
-    # Core utilization
     core_utils = [0] * num_cores
     for task_idx, core_idx in enumerate(assignment):
         core_utils[core_idx] += tasks[task_idx]['utilization']
 
-    # Makespan calculation (simplified)
     hyperperiod = reduce(lambda a, b: a * b // gcd(a, b),
                          [t['period'] for t in tasks], 1)
     makespan = hyperperiod * max(core_utils)
 
-    # QoS (assuming all deadlines met if util <= 1)
     task_qos = [100 if tasks[i]['utilization'] <= 1 else 0
                 for i in range(len(tasks))]
     system_qos = 100 if all(u <= 1 for u in core_utils) else 0
@@ -130,7 +116,6 @@ def calculate_metrics(tasks, assignment, num_cores):
         'hyperperiod': hyperperiod
     }
 
-
 def run_simulation():
     configurations = [
         (8, 0.25), (8, 0.5), (8, 0.75), (8, 1.0),
@@ -142,13 +127,11 @@ def run_simulation():
 
     for cores, util_per_core in configurations:
         total_util = cores * util_per_core
-        tasks = generate_tasks(3 * cores, total_util)  # ~3 tasks per core
+        tasks = generate_tasks(3 * cores, total_util)
 
-        # Run GA scheduler
         scheduler = GeneticScheduler(tasks, cores)
         assignment = scheduler.evolve()
 
-        # Calculate metrics
         metrics = calculate_metrics(tasks, assignment, cores)
         results[(cores, util_per_core)] = {
             'tasks': tasks,
@@ -158,14 +141,10 @@ def run_simulation():
 
     return results
 
-
-# 4. Generate Plots and Outputs
 def visualize_results(results):
-    # Setup plot structure
     fig, axs = plt.subplots(3, 2, figsize=(15, 20))
     plt.subplots_adjust(hspace=0.5)
 
-    # Data collection for aggregated plots
     system_qos_data = {8: [], 16: [], 32: []}
     makespan_data = {8: [], 16: [], 32: []}
     core_util_data = []
@@ -174,7 +153,6 @@ def visualize_results(results):
         metrics = data['metrics']
         tasks = data['tasks']
 
-        # Task QoS (Plot 1)
         axs[0, 0].plot(
             [t['id'] for t in tasks],
             metrics['task_qos'],
@@ -182,13 +160,10 @@ def visualize_results(results):
             label=f'{cores} cores, u={util_per_core}'
         )
 
-        # System QoS (Plot 2)
         system_qos_data[cores].append(metrics['system_qos'])
 
-        # Makespan (Plot 3)
         makespan_data[cores].append(metrics['makespan'])
 
-        # Core Utilization (Plot 4)
         for i, util in enumerate(metrics['core_utils']):
             core_util_data.append({
                 'cores': cores,
@@ -196,7 +171,6 @@ def visualize_results(results):
                 'util': util
             })
 
-    # System QoS Plot
     for cores, qos_vals in system_qos_data.items():
         axs[0, 1].plot(
             [0.25, 0.5, 0.75, 1.0],
@@ -209,7 +183,6 @@ def visualize_results(results):
     axs[0, 1].set_ylabel('QoS (%)')
     axs[0, 1].legend()
 
-    # Makespan Plot
     for cores, makespan_vals in makespan_data.items():
         axs[1, 0].plot(
             [0.25, 0.5, 0.75, 1.0],
@@ -222,14 +195,12 @@ def visualize_results(results):
     axs[1, 0].set_ylabel('Makespan')
     axs[1, 0].legend()
 
-    # Core Utilization Distribution
     core_util_vals = [d['util'] for d in core_util_data]
     axs[1, 1].hist(core_util_vals, bins=20)
     axs[1, 1].set_title('Core Utilization Distribution')
     axs[1, 1].set_xlabel('Utilization')
     axs[1, 1].set_ylabel('Frequency')
 
-    # Schedulability (Plot 5)
     schedulability = [
         (config, data['metrics']['system_qos'])
         for config, data in results.items()
@@ -241,8 +212,7 @@ def visualize_results(results):
     axs[2, 0].set_ylabel('QoS (%)')
     plt.xticks(rotation=45)
 
-    # Task Table (Plot 6 - Simplified)
-    sample_tasks = list(results.values())[0]['tasks'][:5]  # First 5 tasks
+    sample_tasks = list(results.values())[0]['tasks'][:5]
     task_data = [[t['id'], t['execution'], t['period'], t['deadline'], t['utilization']]
                  for t in sample_tasks]
     axs[2, 1].axis('off')
@@ -253,15 +223,11 @@ def visualize_results(results):
     )
     axs[2, 1].set_title('Sample Task Parameters')
 
-    # Save plots
     plt.savefig('phase_one_results.png', bbox_inches='tight')
     plt.close()
 
-    # Return results for inspection
     return results
 
-
-# Main execution
 if __name__ == "__main__":
     results = run_simulation()
     final_results = visualize_results(results)
