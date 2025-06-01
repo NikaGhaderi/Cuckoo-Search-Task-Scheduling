@@ -28,8 +28,8 @@ This project focuses on scheduling a set of real-time tasks on multi-core proces
 - Comprehensive report with code explanations and analysis of results.
 
 ## Authors
-- [Nika Ghaderi](https://github.com/NikaGhaderi)
-- [Mobina Heidari](https://github.com/mobinaheidari)
+- [Nika Ghaderi]([https://github.com/Author2](https://github.com/NikaGhaderi))
+- [Mobina Heidari]([https://github.com/Author1](https://github.com/mobinaheidari)) 
 
 ## Installation
 1. Clone the repository:
