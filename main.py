@@ -8,7 +8,7 @@ import time as a_time
 
 
 # ==============================================================================
-# SECTION 1: TASK GENERATION AND EDF SIMULATION (UNCHANGED FROM PREVIOUS VERSION)
+# SECTION 1: TASK GENERATION AND EDF SIMULATION
 # ==============================================================================
 
 def generate_tasks(num_tasks, total_utilization):
@@ -82,51 +82,63 @@ def calculate_qos(finish_time, deadline):
     return 100 * (1 - (finish_time - deadline) / deadline)
 
 
-def get_solution_fitness(solution, tasks, num_cores):
-    if len(solution) == 0: return 0
+def get_full_metrics_for_solution(solution, tasks, num_cores):
+    if len(solution) == 0: return {}
     core_assignments = {i: [] for i in range(num_cores)}
     for task_idx, core_idx in enumerate(solution):
         core_assignments[core_idx].append(tasks[task_idx])
 
-    if not tasks: return 0
+    if not tasks: return {}
     periods = [t['period'] for t in tasks if t['period'] > 0]
-    if not periods: return 0
+    if not periods: return {}
     hyperperiod = reduce(lambda a, b: a * b // gcd(a, b) if a > 0 and b > 0 else a or b, periods, 1)
 
-    all_task_qos = []
+    per_task_qos_list, all_core_utils = [], [sum(t['utilization'] for t in core_assignments[i]) for i in
+                                             range(num_cores)]
+    total_makespan = 0
+
     for core_id in range(num_cores):
         tasks_on_core = core_assignments[core_id]
-        job_results, _ = edf_schedule_on_core(tasks_on_core, hyperperiod)
+        job_results, core_makespan = edf_schedule_on_core(tasks_on_core, hyperperiod)
+        total_makespan = max(total_makespan, core_makespan)
         for task in tasks_on_core:
             if task['id'] in job_results and job_results[task['id']]['finish_times']:
                 qos_values = [calculate_qos(ft, dl) for ft, dl in
                               zip(job_results[task['id']]['finish_times'], job_results[task['id']]['deadlines'])]
                 avg_qos = np.mean(qos_values) if qos_values else 0
-                all_task_qos.append(avg_qos)
+                per_task_qos_list.append({'id': task['id'], 'qos': avg_qos})
             else:
-                all_task_qos.append(0)
+                per_task_qos_list.append({'id': task['id'], 'qos': 0})
 
-    return np.mean(all_task_qos) if all_task_qos else 0
+    per_task_qos_list.sort(key=lambda x: x['id'])
+    system_qos_val = np.mean([item['qos'] for item in per_task_qos_list]) if per_task_qos_list else 0
+
+    return {'core_utils': all_core_utils, 'makespan': total_makespan, 'per_task_qos': per_task_qos_list,
+            'system_qos': system_qos_val}
+
+
+def get_solution_fitness(solution, tasks, num_cores):
+    metrics = get_full_metrics_for_solution(solution, tasks, num_cores)
+    return metrics.get('system_qos', 0)
 
 
 # ==============================================================================
-# SECTION 2: METAHEURISTIC ALGORITHMS (GA AND CUCKOO SEARCH)
+# SECTION 2: METAHEURISTIC ALGORITHMS
 # ==============================================================================
 
 class GeneticScheduler:
-    def __init__(self, tasks, num_cores, pop_size=50, elite_frac=0.2, mutation_rate=0.1, generations=100):
-        self.tasks = tasks
-        self.num_cores = num_cores
+    def __init__(self, tasks, num_cores, pop_size=25, elite_frac=0.2, mutation_rate=0.1, generations=30):
+        self.tasks = tasks;
+        self.num_cores = num_cores;
         self.pop_size = pop_size
-        self.elite_size = int(elite_frac * pop_size)
+        self.elite_size = int(elite_frac * pop_size);
         self.mutation_rate = mutation_rate
-        self.generations = generations
+        self.generations = generations;
         self.fitness_cache = {}
 
     def _fitness(self, solution):
         sol_tuple = tuple(solution)
-        if sol_tuple in self.fitness_cache:
-            return self.fitness_cache[sol_tuple]
+        if sol_tuple in self.fitness_cache: return self.fitness_cache[sol_tuple]
         fitness_val = get_solution_fitness(solution, self.tasks, self.num_cores)
         self.fitness_cache[sol_tuple] = fitness_val
         return fitness_val
@@ -137,19 +149,16 @@ class GeneticScheduler:
     def evolve(self):
         if not self.tasks or self.num_cores == 0: return []
         population = self.initialize_population()
-
         for _ in range(self.generations):
             fitnesses = [self._fitness(p) for p in population]
             elite_indices = np.argsort(fitnesses)[-self.elite_size:]
             new_population = [population[i] for i in elite_indices]
-
             total_fitness = sum(fitnesses)
             if total_fitness > 0:
                 probs = [f / total_fitness for f in fitnesses]
                 parent_indices = np.random.choice(len(population), size=self.pop_size - self.elite_size, p=probs,
                                                   replace=True)
                 parents = [population[i] for i in parent_indices]
-
                 for i in range(0, len(parents), 2):
                     if i + 1 < len(parents):
                         p1, p2 = parents[i], parents[i + 1]
@@ -158,22 +167,20 @@ class GeneticScheduler:
                         for j in range(len(c1)):
                             if random.random() < self.mutation_rate: c1[j] = random.randint(0, self.num_cores - 1)
                         new_population.append(c1)
-
             population = new_population[:self.pop_size]
-
         final_fitnesses = [self._fitness(p) for p in population]
         return population[np.argmax(final_fitnesses)]
 
 
 class CuckooScheduler:
-    def __init__(self, tasks, num_cores, n_nests=50, pa=0.25, beta=1.5, generations=100):
-        self.tasks = tasks
-        self.num_cores = num_cores
+    def __init__(self, tasks, num_cores, n_nests=25, pa=0.25, beta=1.5, generations=30):
+        self.tasks = tasks;
+        self.num_cores = num_cores;
         self.n_nests = n_nests
-        self.pa = pa
-        self.beta = beta
+        self.pa = pa;
+        self.beta = beta;
         self.generations = generations
-        self.n_tasks = len(tasks)
+        self.n_tasks = len(tasks);
         self.fitness_cache = {}
 
     def _fitness(self, nest):
@@ -186,49 +193,34 @@ class CuckooScheduler:
     def _levy_flight_step(self):
         sigma_u = (gamma(1 + self.beta) * np.sin(np.pi * self.beta / 2) / (
                     gamma((1 + self.beta) / 2) * self.beta * 2 ** ((self.beta - 1) / 2))) ** (1 / self.beta)
-        sigma_v = 1
-        u = np.random.normal(0, sigma_u, 1)
-        v = np.random.normal(0, sigma_v, 1)
-        step = u / (np.abs(v) ** (1 / self.beta))
-        return step
+        u = np.random.normal(0, sigma_u, 1);
+        v = np.random.normal(0, 1, 1)
+        return u / (np.abs(v) ** (1 / self.beta))
 
     def run(self):
         if not self.tasks or self.num_cores == 0: return []
         nests = [np.random.randint(0, self.num_cores, self.n_tasks) for _ in range(self.n_nests)]
         fitnesses = np.array([self._fitness(nest) for nest in nests])
-
-        best_nest_idx = np.argmax(fitnesses)
-        best_nest = nests[best_nest_idx]
-        best_fitness = fitnesses[best_nest_idx]
-
+        best_nest = nests[np.argmax(fitnesses)];
+        best_fitness = np.max(fitnesses)
         for _ in range(self.generations):
-            step_size = 0.01 * self._levy_flight_step() * (best_nest - nests[random.randint(0, self.n_nests - 1)])
+            step = self._levy_flight_step()
+            step_size = 0.01 * step * (best_nest - nests[random.randint(0, self.n_nests - 1)])
             new_nest = nests[random.randint(0, self.n_nests - 1)].copy()
-
-            n_changes = int(np.linalg.norm(step_size) / self.n_tasks * 100) + 1
-            n_changes = min(n_changes, self.n_tasks)
-
+            n_changes = min(int(np.linalg.norm(step_size)) + 1, self.n_tasks)
             indices_to_change = random.sample(range(self.n_tasks), n_changes)
-            for idx in indices_to_change:
-                new_nest[idx] = random.randint(0, self.num_cores - 1)
-
+            for idx in indices_to_change: new_nest[idx] = random.randint(0, self.num_cores - 1)
             f_new = self._fitness(new_nest)
             j = random.randint(0, self.n_nests - 1)
-            if f_new > fitnesses[j]:
-                nests[j] = new_nest
-                fitnesses[j] = f_new
-
-            if f_new > best_fitness:
-                best_fitness = f_new
-                best_nest = new_nest
-
-            sorted_indices = np.argsort(fitnesses)
+            if f_new > fitnesses[j]: nests[j], fitnesses[j] = new_nest, f_new
+            if f_new > best_fitness: best_fitness, best_nest = f_new, new_nest
             n_abandon = int(self.pa * self.n_nests)
-            for k in range(n_abandon):
-                idx_to_abandon = sorted_indices[k]
-                nests[idx_to_abandon] = np.random.randint(0, self.num_cores, self.n_tasks)
-                fitnesses[idx_to_abandon] = self._fitness(nests[idx_to_abandon])
-
+            if n_abandon > 0:
+                sorted_indices = np.argsort(fitnesses)
+                for k in range(n_abandon):
+                    idx_to_abandon = sorted_indices[k]
+                    nests[idx_to_abandon] = np.random.randint(0, self.num_cores, self.n_tasks)
+                    fitnesses[idx_to_abandon] = self._fitness(nests[idx_to_abandon])
         return nests[np.argmax(fitnesses)]
 
 
@@ -237,73 +229,153 @@ class CuckooScheduler:
 # ==============================================================================
 
 def run_phase_two_simulation(num_runs_per_config=3):
-    configurations = [
-        (8, 0.5), (8, 0.75), (8, 1.0),
-        (16, 0.5), (16, 0.75), (16, 1.0),
-        (32, 0.5), (32, 0.75), (32, 1.0)
-    ]
+    configurations = [(8, 0.5), (8, 0.75), (8, 1.0), (16, 0.5), (16, 0.75), (16, 1.0), (32, 0.5), (32, 0.75), (32, 1.0)]
     results = {}
-
     for cores, util_per_core in configurations:
         print(f"Running Config: {cores} Cores, {util_per_core} Util/Core...")
-        ga_runs, cs_runs = [], []
+        config_results = {'GA': [], 'CS': []}
         for i in range(num_runs_per_config):
             tasks = generate_tasks(num_tasks=int(4 * cores), total_utilization=cores * util_per_core)
             if not tasks: continue
 
             ga_scheduler = GeneticScheduler(tasks, cores)
             ga_assignment = ga_scheduler.evolve()
-            if len(ga_assignment) > 0:
-                core_utils = [sum(tasks[i]['utilization'] for i, c in enumerate(ga_assignment) if c == core_id) for
-                              core_id in range(cores)]
-                ga_runs.append(get_solution_fitness(ga_assignment, tasks, cores))
+            if len(ga_assignment) > 0: config_results['GA'].append(
+                {'tasks': tasks, 'metrics': get_full_metrics_for_solution(ga_assignment, tasks, cores)})
 
             cs_scheduler = CuckooScheduler(tasks, cores)
             cs_assignment = cs_scheduler.run()
-            if len(cs_assignment) > 0:
-                core_utils = [sum(tasks[i]['utilization'] for i, c in enumerate(cs_assignment) if c == core_id) for
-                              core_id in range(cores)]
-                cs_runs.append(get_solution_fitness(cs_assignment, tasks, cores))
+            if len(cs_assignment) > 0: config_results['CS'].append(
+                {'tasks': tasks, 'metrics': get_full_metrics_for_solution(cs_assignment, tasks, cores)})
 
-        results[(cores, util_per_core)] = {'GA': ga_runs, 'CS': cs_runs}
+        results[(cores, util_per_core)] = config_results
     return results
 
 
-def visualize_comparison_results(results):
+def visualize_detailed_results(results, algo_name, filename):
+    fig, axs = plt.subplots(3, 2, figsize=(18, 24))
+    fig.suptitle(f'Detailed Results for {algo_name}', fontsize=20, y=0.95)
+    plt.subplots_adjust(hspace=0.5, wspace=0.3)
+    util_levels = sorted(list(set(k[1] for k in results.keys())))
+
+    # Plot 1: Individual Task QoS
+    ax = axs[0, 0]
+    sample_config_key = (16, 0.75)
+    if sample_config_key in results and results[sample_config_key][algo_name]:
+        last_run_metrics = results[sample_config_key][algo_name][-1]['metrics']
+        task_qos_data = last_run_metrics.get('per_task_qos', [])
+        if task_qos_data:
+            ax.plot([t['id'] for t in task_qos_data], [t['qos'] for t in task_qos_data], 'o', alpha=0.7)
+    ax.set_title('Individual Task QoS (Sample Run)');
+    ax.set_xlabel('Task ID');
+    ax.set_ylabel('Task QoS (%)');
+    ax.grid(True, linestyle='--', alpha=0.6)
+
+    # Plot 2: Average System QoS
+    ax = axs[0, 1]
+    for cores in [8, 16, 32]:
+        avg_qos_vals = [np.mean(
+            [run['metrics']['system_qos'] for run in results.get((cores, u), {}).get(algo_name, [])]) if results.get(
+            (cores, u), {}).get(algo_name) else np.nan for u in util_levels]
+        ax.plot(util_levels, avg_qos_vals, '-o', label=f'{cores} cores')
+    ax.set_title('Average System QoS vs. System Load');
+    ax.set_xlabel('Target Utilization per Core');
+    ax.set_ylabel('Average QoS (%)');
+    ax.set_ylim(0, 101);
+    ax.legend();
+    ax.grid(True, linestyle='--', alpha=0.6)
+
+    # Plot 3: Average Makespan
+    ax = axs[1, 0]
+    for cores in [8, 16, 32]:
+        avg_makespan_vals = [np.mean(
+            [run['metrics']['makespan'] for run in results.get((cores, u), {}).get(algo_name, [])]) if results.get(
+            (cores, u), {}).get(algo_name) else np.nan for u in util_levels]
+        ax.plot(util_levels, avg_makespan_vals, '-o', label=f'{cores} cores')
+    ax.set_title('Average Makespan vs. System Load');
+    ax.set_xlabel('Target Utilization per Core');
+    ax.set_ylabel('Makespan');
+    ax.legend();
+    ax.grid(True, linestyle='--', alpha=0.6)
+
+    # Plot 4: Core Utilization Distribution
+    ax = axs[1, 1]
+    all_core_utils = [util for cfg_res in results.values() for run in cfg_res[algo_name] for util in
+                      run['metrics']['core_utils']]
+    if all_core_utils: ax.hist(all_core_utils, bins=25, edgecolor='black')
+    ax.set_title('Overall Core Utilization Distribution');
+    ax.set_xlabel('Core Utilization');
+    ax.set_ylabel('Frequency');
+    ax.grid(True, linestyle='--', alpha=0.6)
+
+    # Plot 5: System Schedulability
+    ax = axs[2, 0]
+    configs_str = [f'{c[0]}c/{c[1]}u' for c in results.keys()]
+    avg_sched_vals = [
+        np.mean([run['metrics']['system_qos'] for run in results.get(cfg, {}).get(algo_name, [])]) if results.get(cfg,
+                                                                                                                  {}).get(
+            algo_name) else 0 for cfg in results.keys()]
+    ax.bar(configs_str, avg_sched_vals)
+    ax.set_title('System Schedulability (Avg. QoS)');
+    ax.set_ylabel('Average QoS (%)');
+    ax.tick_params(axis='x', rotation=45);
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+
+    # Plot 6: Task Table
+    ax = axs[2, 1]
+    ax.axis('off')
+    if sample_config_key in results and results[sample_config_key][algo_name]:
+        sample_tasks = results[sample_config_key][algo_name][-1]['tasks'][:6]
+        task_data = [[t['id'], f"{t['execution']:.2f}", t['period'], f"{t['utilization']:.3f}"] for t in sample_tasks]
+        col_labels = ['ID', 'Exec', 'Period', 'Util']
+        table = ax.table(cellText=task_data, colLabels=col_labels, loc='center', cellLoc='center')
+        table.auto_set_font_size(False);
+        table.set_fontsize(10);
+        table.scale(1.1, 1.2)
+        ax.set_title('Sample Task Parameters', pad=20)
+
+    plt.savefig(filename, bbox_inches='tight', dpi=150)
+    plt.close()
+
+
+def visualize_comparison_results(results, filename):
     fig, ax = plt.subplots(1, 1, figsize=(12, 8))
     util_levels = sorted(list(set(k[1] for k in results.keys())))
 
     for algo in ['GA', 'CS']:
         for cores in [8, 16, 32]:
-            avg_qos = []
-            for util in util_levels:
-                if (cores, util) in results:
-                    qos_values = results[(cores, util)][algo]
-                    avg_qos.append(np.mean(qos_values) if qos_values else np.nan)
-                else:
-                    avg_qos.append(np.nan)
-
+            avg_qos = [np.mean(
+                [run['metrics']['system_qos'] for run in results.get((cores, u), {}).get(algo, [])]) if results.get(
+                (cores, u), {}).get(algo) else np.nan for u in util_levels]
             line_style = '-' if algo == 'GA' else '--'
-            ax.plot(util_levels, avg_qos, marker='o', linestyle=line_style, label=f'{cores} Cores - {algo}')
+            marker = 'o' if algo == 'GA' else 's'
+            ax.plot(util_levels, avg_qos, marker=marker, linestyle=line_style, label=f'{cores} Cores - {algo}')
 
     ax.set_title('Algorithm Comparison: Average System QoS vs. System Load', fontsize=16)
     ax.set_xlabel('Target Utilization per Core', fontsize=12)
     ax.set_ylabel('Average System QoS (%)', fontsize=12)
-    ax.set_ylim(0, 101)
-    ax.legend()
+    ax.set_ylim(0, 101);
+    ax.legend();
     ax.grid(True, which='both', linestyle='--', linewidth=0.5)
 
-    plt.savefig('phase_two_comparison.png', bbox_inches='tight', dpi=150)
+    plt.savefig(filename, bbox_inches='tight', dpi=150)
     plt.close()
 
 
 if __name__ == "__main__":
     start_time = a_time.time()
-    simulation_results = run_phase_two_simulation(num_runs_per_config=5)
+    simulation_results = run_phase_two_simulation(num_runs_per_config=3)
+
     if simulation_results:
-        visualize_comparison_results(simulation_results)
-        print("Phase Two simulation finished successfully.")
-        print(f"Results saved to 'phase_two_comparison.png'.")
+        visualize_comparison_results(simulation_results, 'phase_two_comparison.png')
+        print("Generated: phase_two_comparison.png")
+
+        visualize_detailed_results(simulation_results, 'GA', 'phase_two_GA_details.png')
+        print("Generated: phase_two_GA_details.png")
+
+        visualize_detailed_results(simulation_results, 'CS', 'phase_two_CS_details.png')
+        print("Generated: phase_two_CS_details.png")
     else:
         print("Simulation did not produce results.")
+
     print(f"Total execution time: {a_time.time() - start_time:.2f} seconds.")
