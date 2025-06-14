@@ -5,6 +5,7 @@ from math import gcd, gamma
 from functools import reduce
 import heapq
 import time as a_time
+import os
 
 
 # ==============================================================================
@@ -258,7 +259,6 @@ def visualize_detailed_results(results, algo_name, filename):
     plt.subplots_adjust(hspace=0.5, wspace=0.3)
     util_levels = sorted(list(set(k[1] for k in results.keys())))
 
-    # Plot 1: Individual Task QoS
     ax = axs[0, 0]
     sample_config_key = (16, 0.75)
     if sample_config_key in results and results[sample_config_key][algo_name]:
@@ -271,7 +271,6 @@ def visualize_detailed_results(results, algo_name, filename):
     ax.set_ylabel('Task QoS (%)');
     ax.grid(True, linestyle='--', alpha=0.6)
 
-    # Plot 2: Average System QoS
     ax = axs[0, 1]
     for cores in [8, 16, 32]:
         avg_qos_vals = [np.mean(
@@ -285,7 +284,6 @@ def visualize_detailed_results(results, algo_name, filename):
     ax.legend();
     ax.grid(True, linestyle='--', alpha=0.6)
 
-    # Plot 3: Average Makespan
     ax = axs[1, 0]
     for cores in [8, 16, 32]:
         avg_makespan_vals = [np.mean(
@@ -298,7 +296,6 @@ def visualize_detailed_results(results, algo_name, filename):
     ax.legend();
     ax.grid(True, linestyle='--', alpha=0.6)
 
-    # Plot 4: Core Utilization Distribution
     ax = axs[1, 1]
     all_core_utils = [util for cfg_res in results.values() for run in cfg_res[algo_name] for util in
                       run['metrics']['core_utils']]
@@ -308,7 +305,6 @@ def visualize_detailed_results(results, algo_name, filename):
     ax.set_ylabel('Frequency');
     ax.grid(True, linestyle='--', alpha=0.6)
 
-    # Plot 5: System Schedulability
     ax = axs[2, 0]
     configs_str = [f'{c[0]}c/{c[1]}u' for c in results.keys()]
     avg_sched_vals = [
@@ -321,7 +317,6 @@ def visualize_detailed_results(results, algo_name, filename):
     ax.tick_params(axis='x', rotation=45);
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
 
-    # Plot 6: Task Table
     ax = axs[2, 1]
     ax.axis('off')
     if sample_config_key in results and results[sample_config_key][algo_name]:
@@ -363,18 +358,24 @@ def visualize_comparison_results(results, filename):
 
 
 if __name__ == "__main__":
+    RESULTS_DIR = "results"
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+
     start_time = a_time.time()
     simulation_results = run_phase_two_simulation(num_runs_per_config=3)
 
     if simulation_results:
-        visualize_comparison_results(simulation_results, 'phase_two_comparison.png')
-        print("Generated: phase_two_comparison.png")
+        comparison_filename = os.path.join(RESULTS_DIR, 'phase_two_comparison.png')
+        visualize_comparison_results(simulation_results, comparison_filename)
+        print(f"Generated: {comparison_filename}")
 
-        visualize_detailed_results(simulation_results, 'GA', 'phase_two_GA_details.png')
-        print("Generated: phase_two_GA_details.png")
+        ga_details_filename = os.path.join(RESULTS_DIR, 'phase_two_GA_details.png')
+        visualize_detailed_results(simulation_results, 'GA', ga_details_filename)
+        print(f"Generated: {ga_details_filename}")
 
-        visualize_detailed_results(simulation_results, 'CS', 'phase_two_CS_details.png')
-        print("Generated: phase_two_CS_details.png")
+        cs_details_filename = os.path.join(RESULTS_DIR, 'phase_two_CS_details.png')
+        visualize_detailed_results(simulation_results, 'CS', cs_details_filename)
+        print(f"Generated: {cs_details_filename}")
     else:
         print("Simulation did not produce results.")
 
