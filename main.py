@@ -229,7 +229,7 @@ class CuckooScheduler:
 # SECTION 3: SIMULATION AND VISUALIZATION
 # ==============================================================================
 
-def run_phase_two_simulation(num_runs_per_config=3):
+def run_simulation(num_runs_per_config=3):
     configurations = [(8, 0.5), (8, 0.75), (8, 1.0), (16, 0.5), (16, 0.75), (16, 1.0), (32, 0.5), (32, 0.75), (32, 1.0)]
     results = {}
     for cores, util_per_core in configurations:
@@ -362,7 +362,7 @@ if __name__ == "__main__":
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     start_time = a_time.time()
-    simulation_results = run_phase_two_simulation(num_runs_per_config=3)
+    simulation_results = run_simulation(num_runs_per_config=3)
 
     if simulation_results:
         comparison_filename = os.path.join(RESULTS_DIR, 'phase_two_comparison.png')
