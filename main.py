@@ -205,16 +205,27 @@ class CuckooScheduler:
         best_nest = nests[np.argmax(fitnesses)];
         best_fitness = np.max(fitnesses)
         for _ in range(self.generations):
-            step = self._levy_flight_step()
-            step_size = 0.01 * step * (best_nest - nests[random.randint(0, self.n_nests - 1)])
-            new_nest = nests[random.randint(0, self.n_nests - 1)].copy()
-            n_changes = min(int(np.linalg.norm(step_size)) + 1, self.n_tasks)
-            indices_to_change = random.sample(range(self.n_tasks), n_changes)
-            for idx in indices_to_change: new_nest[idx] = random.randint(0, self.num_cores - 1)
+            # --- STRATEGY 1: GENERATE NEW CUCKOO VIA GUIDED LEVY FLIGHT ---
+            levy_step = self._levy_flight_step()
+            # The step size influences the crossover probability
+            crossover_prob = 1 / (1 + 0.1 * abs(levy_step))  # Sigmoid-like mapping
+
+            random_nest = nests[random.randint(0, self.n_nests - 1)]
+            new_nest = best_nest.copy()
+
+            # Create a mask for crossover
+            mask = np.random.rand(self.n_tasks) > crossover_prob
+            new_nest[mask] = random_nest[mask]
+
             f_new = self._fitness(new_nest)
-            j = random.randint(0, self.n_nests - 1)
-            if f_new > fitnesses[j]: nests[j], fitnesses[j] = new_nest, f_new
-            if f_new > best_fitness: best_fitness, best_nest = f_new, new_nest
+            rand_idx = random.randint(0, self.n_nests - 1)
+            if f_new > fitnesses[rand_idx]:
+                nests[rand_idx], fitnesses[rand_idx] = new_nest, f_new
+
+            if f_new > best_fitness:
+                best_fitness, best_nest = f_new, new_nest
+
+            # --- STRATEGY 2: ABANDON WORST NESTS ---
             n_abandon = int(self.pa * self.n_nests)
             if n_abandon > 0:
                 sorted_indices = np.argsort(fitnesses)
@@ -229,7 +240,7 @@ class CuckooScheduler:
 # SECTION 3: SIMULATION AND VISUALIZATION
 # ==============================================================================
 
-def run_simulation(num_runs_per_config=3):
+def run_phase_two_simulation(num_runs_per_config=3):
     configurations = [(8, 0.5), (8, 0.75), (8, 1.0), (16, 0.5), (16, 0.75), (16, 1.0), (32, 0.5), (32, 0.75), (32, 1.0)]
     results = {}
     for cores, util_per_core in configurations:
@@ -362,18 +373,18 @@ if __name__ == "__main__":
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     start_time = a_time.time()
-    simulation_results = run_simulation(num_runs_per_config=3)
+    simulation_results = run_phase_two_simulation(num_runs_per_config=3)
 
     if simulation_results:
-        comparison_filename = os.path.join(RESULTS_DIR, 'phase_two_comparison.png')
+        comparison_filename = os.path.join(RESULTS_DIR, 'phase_two_comparison_enhanced.png')
         visualize_comparison_results(simulation_results, comparison_filename)
         print(f"Generated: {comparison_filename}")
 
-        ga_details_filename = os.path.join(RESULTS_DIR, 'phase_two_GA_details.png')
+        ga_details_filename = os.path.join(RESULTS_DIR, 'phase_two_GA_details_enhanced.png')
         visualize_detailed_results(simulation_results, 'GA', ga_details_filename)
         print(f"Generated: {ga_details_filename}")
 
-        cs_details_filename = os.path.join(RESULTS_DIR, 'phase_two_CS_details.png')
+        cs_details_filename = os.path.join(RESULTS_DIR, 'phase_two_CS_details_enhanced.png')
         visualize_detailed_results(simulation_results, 'CS', cs_details_filename)
         print(f"Generated: {cs_details_filename}")
     else:
