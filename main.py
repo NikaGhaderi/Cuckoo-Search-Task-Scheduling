@@ -174,95 +174,62 @@ class GeneticScheduler:
 
 
 class CuckooScheduler:
-    def __init__(self, tasks, num_cores, n_nests=25, pa=0.25, beta=1.5, alpha=0.1, generations=30):
+    def __init__(self, tasks, num_cores, n_nests=25, pa=0.25, beta=1.5, generations=30):
         self.tasks = tasks;
         self.num_cores = num_cores;
         self.n_nests = n_nests
         self.pa = pa;
         self.beta = beta;
-        self.alpha = alpha;
         self.generations = generations
         self.n_tasks = len(tasks);
         self.fitness_cache = {}
-        self.lower_bound = 0;
-        self.upper_bound = num_cores
-
-    def _decode_nest(self, continuous_nest):
-        return np.floor(continuous_nest).astype(int)
 
     def _fitness(self, nest):
-        discrete_nest = self._decode_nest(nest)
-        nest_tuple = tuple(discrete_nest)
+        nest_tuple = tuple(nest)
         if nest_tuple in self.fitness_cache: return self.fitness_cache[nest_tuple]
-        fitness_val = get_solution_fitness(discrete_nest, self.tasks, self.num_cores)
+        fitness_val = get_solution_fitness(nest, self.tasks, self.num_cores)
         self.fitness_cache[nest_tuple] = fitness_val
         return fitness_val
 
     def _levy_flight_step(self):
         sigma_u = (gamma(1 + self.beta) * np.sin(np.pi * self.beta / 2) / (
                     gamma((1 + self.beta) / 2) * self.beta * 2 ** ((self.beta - 1) / 2))) ** (1 / self.beta)
-        u = np.random.normal(0, sigma_u, self.n_tasks);
-        v = np.random.normal(0, 1, self.n_tasks)
+        u = np.random.normal(0, sigma_u, 1);
+        v = np.random.normal(0, 1, 1)
         return u / (np.abs(v) ** (1 / self.beta))
-
-    def _apply_bounds(self, nest):
-        nest[nest < self.lower_bound] = self.lower_bound
-        nest[nest >= self.upper_bound] = self.upper_bound - 1e-9
-        return nest
 
     def run(self):
         if not self.tasks or self.num_cores == 0: return []
-        nests = [np.random.uniform(self.lower_bound, self.upper_bound, self.n_tasks) for _ in range(self.n_nests)]
+        nests = [np.random.randint(0, self.num_cores, self.n_tasks) for _ in range(self.n_nests)]
         fitnesses = np.array([self._fitness(nest) for nest in nests])
-
-        best_nest_idx = np.argmax(fitnesses)
-        best_nest = nests[best_nest_idx]
-        best_fitness = fitnesses[best_nest_idx]
-
+        best_nest = nests[np.argmax(fitnesses)];
+        best_fitness = np.max(fitnesses)
         for _ in range(self.generations):
-            # --- STRATEGY 1: GENERATE NEW CUCKOO VIA GUIDED LEVY FLIGHT ---
-            i = random.randint(0, self.n_nests - 1)
-            current_nest = nests[i]
-
-            step_direction = self._levy_flight_step()
-            # The step is now guided by the difference to the best solution
-            step_size = self.alpha * (current_nest - best_nest)
-
-            new_nest = current_nest + step_direction * step_size
-            new_nest = self._apply_bounds(new_nest)
-
+            step = self._levy_flight_step()
+            step_size = 0.01 * step * (best_nest - nests[random.randint(0, self.n_nests - 1)])
+            new_nest = nests[random.randint(0, self.n_nests - 1)].copy()
+            n_changes = min(int(np.linalg.norm(step_size)) + 1, self.n_tasks)
+            indices_to_change = random.sample(range(self.n_tasks), n_changes)
+            for idx in indices_to_change: new_nest[idx] = random.randint(0, self.num_cores - 1)
             f_new = self._fitness(new_nest)
-
-            # Replace the current nest if the new one is better
-            if f_new > fitnesses[i]:
-                nests[i], fitnesses[i] = new_nest, f_new
-
-            if f_new > best_fitness:
-                best_fitness, best_nest = f_new, new_nest
-
-            # --- STRATEGY 2: ABANDON WORST NESTS ---
+            j = random.randint(0, self.n_nests - 1)
+            if f_new > fitnesses[j]: nests[j], fitnesses[j] = new_nest, f_new
+            if f_new > best_fitness: best_fitness, best_nest = f_new, new_nest
             n_abandon = int(self.pa * self.n_nests)
             if n_abandon > 0:
-                # Abandon nests with a probability pa, not just the absolute worst
-                for k in range(self.n_nests):
-                    if random.random() < self.pa:
-                        nest1 = nests[random.randint(0, self.n_nests - 1)]
-                        nest2 = nests[random.randint(0, self.n_nests - 1)]
-                        # Create a new nest by mixing two random nests
-                        mask = np.random.rand(self.n_tasks) > 0.5
-                        nests[k][mask] = nest1[mask]
-                        nests[k][~mask] = nest2[~mask]
-                        nests[k] = self._apply_bounds(nests[k])
-                        fitnesses[k] = self._fitness(nests[k])
-
-        return self._decode_nest(best_nest)
+                sorted_indices = np.argsort(fitnesses)
+                for k in range(n_abandon):
+                    idx_to_abandon = sorted_indices[k]
+                    nests[idx_to_abandon] = np.random.randint(0, self.num_cores, self.n_tasks)
+                    fitnesses[idx_to_abandon] = self._fitness(nests[idx_to_abandon])
+        return nests[np.argmax(fitnesses)]
 
 
 # ==============================================================================
 # SECTION 3: SIMULATION AND VISUALIZATION
 # ==============================================================================
 
-def run_phase_two_simulation(num_runs_per_config=3):
+def run_simulation(num_runs_per_config=3):
     configurations = [(8, 0.5), (8, 0.75), (8, 1.0), (16, 0.5), (16, 0.75), (16, 1.0), (32, 0.5), (32, 0.75), (32, 1.0)]
     results = {}
     for cores, util_per_core in configurations:
@@ -395,18 +362,18 @@ if __name__ == "__main__":
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     start_time = a_time.time()
-    simulation_results = run_phase_two_simulation(num_runs_per_config=3)
+    simulation_results = run_simulation(num_runs_per_config=3)
 
     if simulation_results:
-        comparison_filename = os.path.join(RESULTS_DIR, 'phase_two_comparison_final.png')
+        comparison_filename = os.path.join(RESULTS_DIR, 'phase_two_comparison.png')
         visualize_comparison_results(simulation_results, comparison_filename)
         print(f"Generated: {comparison_filename}")
 
-        ga_details_filename = os.path.join(RESULTS_DIR, 'phase_two_GA_details_final.png')
+        ga_details_filename = os.path.join(RESULTS_DIR, 'phase_two_GA_details.png')
         visualize_detailed_results(simulation_results, 'GA', ga_details_filename)
         print(f"Generated: {ga_details_filename}")
 
-        cs_details_filename = os.path.join(RESULTS_DIR, 'phase_two_CS_details_final.png')
+        cs_details_filename = os.path.join(RESULTS_DIR, 'phase_two_CS_details.png')
         visualize_detailed_results(simulation_results, 'CS', cs_details_filename)
         print(f"Generated: {cs_details_filename}")
     else:
